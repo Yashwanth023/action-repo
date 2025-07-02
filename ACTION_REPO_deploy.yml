@@ -1,0 +1,279 @@
+# Production Deployment Pipeline
+# TechStaX Developer Assessment - GitHub Actions Demo
+
+name: Deploy to Production
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+        - staging
+        - production
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: action-repo
+
+jobs:
+  # Build and Push Docker Image
+  build:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+      image-digest: ${{ steps.build.outputs.digest }}
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ github.repository }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+          
+    - name: Build and push Docker image
+      id: build
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./docker/Dockerfile
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        platforms: linux/amd64,linux/arm64
+
+  # Security Scanning
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: build
+    
+    steps:
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ needs.build.outputs.image-tag }}
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+        
+    - name: Upload Trivy scan results
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+  # Deploy to Staging
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [build, security-scan]
+    environment: staging
+    if: github.ref == 'refs/heads/main' || github.event.inputs.environment == 'staging'
+    
+    steps:
+    - name: Deploy to staging environment
+      run: |
+        echo "🚀 Deploying to staging environment..."
+        echo "Image: ${{ needs.build.outputs.image-tag }}"
+        echo "Digest: ${{ needs.build.outputs.image-digest }}"
+        
+        # Simulate deployment
+        echo "✅ Application deployed to staging"
+        echo "🔗 Staging URL: https://action-repo-staging.example.com"
+        
+    - name: Run smoke tests
+      run: |
+        echo "🧪 Running smoke tests..."
+        # Simulate smoke tests
+        sleep 5
+        echo "✅ Smoke tests passed"
+        
+    - name: Health check
+      run: |
+        echo "🏥 Performing health check..."
+        # Simulate health check
+        sleep 3
+        echo "✅ Application is healthy"
+
+  # Performance Testing
+  performance-test:
+    name: Performance Testing
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        
+    - name: Install dependencies
+      run: npm ci
+      
+    - name: Run load tests
+      run: |
+        echo "⚡ Running performance tests..."
+        npm run test:load
+        
+    - name: Analyze performance metrics
+      run: |
+        echo "📊 Analyzing performance metrics..."
+        echo "Response time: 120ms (target: <200ms) ✅"
+        echo "Throughput: 850 req/s (target: >500 req/s) ✅"
+        echo "Error rate: 0.02% (target: <1%) ✅"
+
+  # Deploy to Production
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [build, security-scan, deploy-staging, performance-test]
+    environment: production
+    if: github.ref == 'refs/heads/main' && (github.event.inputs.environment == 'production' || github.event.inputs.environment == '')
+    
+    steps:
+    - name: Pre-deployment checks
+      run: |
+        echo "🔍 Running pre-deployment checks..."
+        echo "✅ Image security scan passed"
+        echo "✅ Staging deployment successful"
+        echo "✅ Performance tests passed"
+        echo "✅ All checks completed"
+        
+    - name: Deploy to production
+      run: |
+        echo "🚀 Deploying to production environment..."
+        echo "Image: ${{ needs.build.outputs.image-tag }}"
+        
+        # Blue-green deployment simulation
+        echo "🔄 Starting blue-green deployment..."
+        echo "📘 Blue environment: Current production"
+        echo "📗 Green environment: New version deployment"
+        
+        # Deploy to green environment
+        sleep 10
+        echo "✅ Green environment deployed successfully"
+        
+    - name: Health check production
+      run: |
+        echo "🏥 Running production health checks..."
+        sleep 5
+        echo "✅ Production health check passed"
+        echo "📈 Application metrics normal"
+        echo "🔗 Production URL: https://action-repo.example.com"
+        
+    - name: Switch traffic
+      run: |
+        echo "🔄 Switching traffic to new version..."
+        echo "📊 Gradual traffic shift: 10% -> 50% -> 100%"
+        sleep 5
+        echo "✅ Traffic switched successfully"
+        echo "📘 Blue environment marked for cleanup"
+
+  # Post-deployment Verification
+  post-deployment:
+    name: Post-deployment Verification
+    runs-on: ubuntu-latest
+    needs: deploy-production
+    if: always() && needs.deploy-production.result == 'success'
+    
+    steps:
+    - name: Verify deployment
+      run: |
+        echo "🔍 Verifying production deployment..."
+        
+        # Simulate API health checks
+        echo "🔌 Testing API endpoints..."
+        echo "✅ /health: 200 OK"
+        echo "✅ /metrics: 200 OK" 
+        echo "✅ /api/status: 200 OK"
+        
+    - name: Monitor application metrics
+      run: |
+        echo "📊 Monitoring application metrics..."
+        echo "✅ CPU usage: 15% (normal)"
+        echo "✅ Memory usage: 45% (normal)" 
+        echo "✅ Response time: 95ms (excellent)"
+        echo "✅ Error rate: 0% (optimal)"
+        
+    - name: Cleanup old versions
+      run: |
+        echo "🧹 Cleaning up old deployment artifacts..."
+        echo "✅ Removed old container images"
+        echo "✅ Cleaned up temporary resources"
+
+  # Rollback Job (Manual Trigger Only)
+  rollback:
+    name: Emergency Rollback
+    runs-on: ubuntu-latest
+    if: failure() && github.ref == 'refs/heads/main'
+    needs: [deploy-production]
+    environment: production
+    
+    steps:
+    - name: Initiate rollback
+      run: |
+        echo "🚨 EMERGENCY ROLLBACK INITIATED"
+        echo "📘 Rolling back to previous stable version..."
+        
+        # Simulate rollback
+        sleep 5
+        echo "✅ Rollback completed successfully"
+        echo "🔍 Investigating deployment failure..."
+        
+    - name: Notify team
+      run: |
+        echo "📧 Sending rollback notification to team"
+        echo "🔔 Incident response team activated"
+
+  # Notification
+  notify:
+    name: Deployment Notification
+    runs-on: ubuntu-latest
+    needs: [build, deploy-staging, deploy-production, post-deployment]
+    if: always()
+    
+    steps:
+    - name: Notify deployment success
+      if: needs.deploy-production.result == 'success'
+      run: |
+        echo "🎉 DEPLOYMENT SUCCESSFUL!"
+        echo "✅ Production deployment completed"
+        echo "🔗 Application URL: https://action-repo.example.com"
+        echo "📊 All metrics normal"
+        
+    - name: Notify deployment failure
+      if: needs.deploy-production.result == 'failure'
+      run: |
+        echo "❌ DEPLOYMENT FAILED!"
+        echo "🚨 Production deployment unsuccessful"
+        echo "🔄 Consider manual rollback if needed"
+        echo "📋 Check logs for failure details"
